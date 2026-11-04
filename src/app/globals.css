@@ -1,0 +1,48 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  color-scheme: dark;
+}
+
+html,
+body {
+  background: #050506;
+  color: #f4f4f6;
+}
+
+body {
+  -webkit-font-smoothing: antialiased;
+  background-image: radial-gradient(1200px 600px at 50% -10%, rgba(229, 9, 20, 0.08), transparent 60%);
+  background-attachment: fixed;
+}
+
+::selection {
+  background: rgba(229, 9, 20, 0.5);
+}
+
+/* Shimmer logo – svetelný odlesk, ktorý pravidelne prejde cez text */
+.logo-shimmer {
+  background-image: linear-gradient(
+    110deg,
+    #b3070f 0%,
+    #e50914 35%,
+    #ffd9dc 48%,
+    #ffffff 50%,
+    #ffd9dc 52%,
+    #e50914 65%,
+    #b3070f 100%
+  );
+  background-size: 200% 100%;
+  -webkit-background-clip: text;
+  background-clip: text;
+  color: transparent;
+  animation: shimmer 4.5s linear infinite;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .logo-shimmer {
+    animation: none;
+  }
+}

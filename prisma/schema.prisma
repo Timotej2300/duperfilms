@@ -1,0 +1,427 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider     = "mysql"
+  url          = env("DATABASE_URL")
+  relationMode = "prisma"
+}
+
+// ───────── Používatelia, role, oprávnenia ─────────
+
+model Role {
+  id          Int              @id @default(autoincrement())
+  key         String           @unique // OWNER, SUPER_ADMIN, ADMIN, MODERATOR, EDITOR, USER
+  name        String
+  isStaff     Boolean          @default(false)
+  permissions RolePermission[]
+  users       User[]
+}
+
+model Permission {
+  id    Int              @id @default(autoincrement())
+  key   String           @unique // napr. movies.write, users.ban
+  label String
+  roles RolePermission[]
+}
+
+model RolePermission {
+  roleId       Int
+  permissionId Int
+  role         Role       @relation(fields: [roleId], references: [id], onDelete: Cascade)
+  permission   Permission @relation(fields: [permissionId], references: [id], onDelete: Cascade)
+
+  @@id([roleId, permissionId])
+  @@index([permissionId])
+}
+
+model User {
+  id              String    @id @default(cuid())
+  email           String    @unique
+  passwordHash    String
+  emailVerifiedAt DateTime?
+  roleId          Int
+  role            Role      @relation(fields: [roleId], references: [id])
+  isBlocked       Boolean   @default(false)
+  locale          String    @default("sk")
+  introEnabled    Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+  lastLoginAt     DateTime?
+
+  profiles      Profile[]
+  sessions      Session[]
+  tokens        AuthToken[]
+  subscriptions Subscription[]
+  payments      Payment[]
+  notifications Notification[]
+  auditLogs     AuditLog[]
+
+  @@index([roleId])
+}
+
+model Session {
+  id         String   @id @default(cuid())
+  userId     String
+  tokenHash  String   @unique // SHA-256 tokenu v cookie
+  userAgent  String?  @db.VarChar(255)
+  ip         String?  @db.VarChar(64)
+  expiresAt  DateTime
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+  @@index([expiresAt])
+}
+
+enum AuthTokenType {
+  VERIFY_EMAIL
+  RESET_PASSWORD
+  CHANGE_EMAIL
+}
+
+model AuthToken {
+  id        String        @id @default(cuid())
+  userId    String
+  type      AuthTokenType
+  tokenHash String        @unique
+  payload   String?       @db.VarChar(255) // napr. nový e-mail
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime      @default(now())
+  user      User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, type])
+}
+
+model RateLimit {
+  key         String   @id @db.VarChar(191) // napr. login:ip:1.2.3.4
+  count       Int      @default(0)
+  windowStart DateTime @default(now())
+  blockedTill DateTime?
+}
+
+// ───────── Profily ─────────
+
+model Profile {
+  id         String   @id @default(cuid())
+  userId     String
+  name       String   @db.VarChar(40)
+  avatar     String   @default("avatar-1")
+  isKids     Boolean  @default(false)
+  maxAge     Int?     // vekový limit pre detský profil
+  pinHash    String?
+  createdAt  DateTime @default(now())
+  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  history   WatchHistory[]
+  favorites Favorite[]
+  ratings   Rating[]
+
+  @@index([userId])
+}
+
+// ───────── Obsah ─────────
+
+model Genre {
+  id     Int          @id @default(autoincrement())
+  slug   String       @unique
+  name   String
+  titles TitleGenre[]
+}
+
+enum TitleType {
+  MOVIE
+  SERIES
+}
+
+enum Visibility {
+  DRAFT
+  SCHEDULED
+  PUBLISHED
+  HIDDEN
+}
+
+model Title {
+  id            String     @id @default(cuid())
+  type          TitleType
+  slug          String     @unique
+  name          String
+  originalName  String?
+  description   String     @db.Text
+  posterUrl     String?    @db.VarChar(500)
+  backdropUrl   String?    @db.VarChar(500)
+  trailerUrl    String?    @db.VarChar(500)
+  streamUrl     String?    @db.VarChar(500) // HLS .m3u8 (len filmy)
+  year          Int?
+  durationMin   Int?
+  director      String?
+  cast          String?    @db.Text // oddelené čiarkou
+  ageRating     Int        @default(0)
+  language      String?
+  subtitles     String?    // napr. "sk,cs,en"
+  quality       String?    // napr. "1080p"
+  ratingAvg     Float      @default(0)
+  viewCount     Int        @default(0)
+  isPremium     Boolean    @default(false)
+  isNew         Boolean    @default(false)
+  isExclusive   Boolean    @default(false)
+  visibility    Visibility @default(DRAFT)
+  publishAt     DateTime?
+  createdAt     DateTime   @default(now())
+  updatedAt     DateTime   @updatedAt
+
+  genres    TitleGenre[]
+  seasons   Season[]
+  history   WatchHistory[]
+  favorites Favorite[]
+  ratings   Rating[]
+  sections  HomeSectionItem[]
+  ads       Advertisement[]
+
+  @@index([type, visibility])
+  @@index([viewCount])
+  @@index([createdAt])
+}
+
+model TitleGenre {
+  titleId String
+  genreId Int
+  title   Title @relation(fields: [titleId], references: [id], onDelete: Cascade)
+  genre   Genre @relation(fields: [genreId], references: [id], onDelete: Cascade)
+
+  @@id([titleId, genreId])
+  @@index([genreId])
+}
+
+model Season {
+  id       String    @id @default(cuid())
+  titleId  String
+  number   Int
+  name     String?
+  title    Title     @relation(fields: [titleId], references: [id], onDelete: Cascade)
+  episodes Episode[]
+
+  @@unique([titleId, number])
+}
+
+model Episode {
+  id          String   @id @default(cuid())
+  seasonId    String
+  number      Int
+  name        String
+  description String?  @db.Text
+  streamUrl   String?  @db.VarChar(500)
+  thumbUrl    String?  @db.VarChar(500)
+  durationMin Int?
+  introStart  Int?     // sekundy – preskočenie intra
+  introEnd    Int?
+  creditsAt   Int?     // sekundy – začiatok titulkov
+  season      Season   @relation(fields: [seasonId], references: [id], onDelete: Cascade)
+  history     WatchHistory[]
+
+  @@unique([seasonId, number])
+}
+
+// ───────── Aktivita profilu ─────────
+
+model WatchHistory {
+  id          String   @id @default(cuid())
+  profileId   String
+  titleId     String
+  episodeId   String?
+  positionSec Int      @default(0)
+  durationSec Int      @default(0)
+  finished    Boolean  @default(false)
+  updatedAt   DateTime @updatedAt
+  profile     Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  title       Title    @relation(fields: [titleId], references: [id], onDelete: Cascade)
+  episode     Episode? @relation(fields: [episodeId], references: [id], onDelete: SetNull)
+
+  @@unique([profileId, titleId, episodeId])
+  @@index([titleId])
+  @@index([episodeId])
+}
+
+model Favorite {
+  profileId String
+  titleId   String
+  createdAt DateTime @default(now())
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  title     Title    @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, titleId])
+  @@index([titleId])
+}
+
+model Rating {
+  profileId String
+  titleId   String
+  value     Int      // 1–5
+  createdAt DateTime @default(now())
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  title     Title    @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  @@id([profileId, titleId])
+  @@index([titleId])
+}
+
+// ───────── Homepage a odporúčania ─────────
+
+model HomeSection {
+  id        Int               @id @default(autoincrement())
+  key       String            @unique // hero, new, popular, continue, mylist, rec1..3, top, exclusive, series
+  title     String
+  kind      String            @default("manual") // manual | auto
+  position  Int               @default(0)
+  isVisible Boolean           @default(true)
+  items     HomeSectionItem[]
+}
+
+model HomeSectionItem {
+  sectionId Int
+  titleId   String
+  position  Int         @default(0)
+  section   HomeSection @relation(fields: [sectionId], references: [id], onDelete: Cascade)
+  title     Title       @relation(fields: [titleId], references: [id], onDelete: Cascade)
+
+  @@id([sectionId, titleId])
+  @@index([titleId])
+}
+
+model Recommendation {
+  id       Int    @id @default(autoincrement())
+  slot     Int    @unique // 1, 2, 3
+  titleId  String
+}
+
+// ───────── Predplatné a platby ─────────
+
+model SubscriptionPlan {
+  id             Int            @id @default(autoincrement())
+  key            String         @unique
+  name           String
+  priceCents     Int            @default(0)
+  currency       String         @default("EUR")
+  intervalMonths Int            @default(1)
+  maxProfiles    Int            @default(1)
+  maxQuality     String         @default("720p")
+  premiumAccess  Boolean        @default(false)
+  adsEnabled     Boolean        @default(true)
+  perks          String?        @db.Text
+  stripePriceId  String?
+  isActive       Boolean        @default(true)
+  subscriptions  Subscription[]
+}
+
+enum SubStatus {
+  ACTIVE
+  PAST_DUE
+  CANCELED
+  EXPIRED
+}
+
+model Subscription {
+  id               String           @id @default(cuid())
+  userId           String
+  planId           Int
+  status           SubStatus        @default(ACTIVE)
+  stripeCustomerId String?
+  stripeSubId      String?          @unique
+  currentPeriodEnd DateTime?
+  createdAt        DateTime         @default(now())
+  user             User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  plan             SubscriptionPlan @relation(fields: [planId], references: [id])
+
+  @@index([userId])
+  @@index([planId])
+}
+
+model Payment {
+  id              String   @id @default(cuid())
+  userId          String
+  stripeEventId   String   @unique // idempotencia webhookov
+  stripeInvoiceId String?
+  amountCents     Int
+  currency        String   @default("EUR")
+  status          String
+  createdAt       DateTime @default(now())
+  user            User     @relation(fields: [userId], references: [id])
+
+  @@index([userId])
+}
+
+model Coupon {
+  id         Int       @id @default(autoincrement())
+  code       String    @unique
+  percentOff Int
+  maxUses    Int?
+  used       Int       @default(0)
+  expiresAt  DateTime?
+  isActive   Boolean   @default(true)
+}
+
+// ───────── Reklamy ─────────
+
+enum AdPlacement {
+  PRE_ROLL
+  MID_ROLL
+  POST_ROLL
+  BANNER
+}
+
+model Advertisement {
+  id          String      @id @default(cuid())
+  name        String
+  mediaType   String      @default("image") // image | video
+  mediaUrl    String      @db.VarChar(500)
+  targetUrl   String?     @db.VarChar(500)
+  placement   AdPlacement @default(PRE_ROLL)
+  titleId     String?     // voliteľne viazaná na film
+  startsAt    DateTime?
+  endsAt      DateTime?
+  maxViews    Int?
+  views       Int         @default(0)
+  clicks      Int         @default(0)
+  isActive    Boolean     @default(true)
+  title       Title?      @relation(fields: [titleId], references: [id], onDelete: SetNull)
+
+  @@index([titleId])
+  @@index([placement, isActive])
+}
+
+// ───────── Notifikácie, nastavenia, audit ─────────
+
+model Notification {
+  id        String   @id @default(cuid())
+  userId    String?  // null = pre všetkých
+  title     String
+  body      String   @db.Text
+  readAt    DateTime?
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId])
+}
+
+model Setting {
+  key       String   @id @db.VarChar(100)
+  value     String   @db.Text
+  updatedAt DateTime @updatedAt
+}
+
+model AuditLog {
+  id        String   @id @default(cuid())
+  userId    String?
+  action    String
+  entity    String?
+  entityId  String?
+  meta      String?  @db.Text
+  ip        String?  @db.VarChar(64)
+  createdAt DateTime @default(now())
+  user      User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+
+  @@index([userId])
+  @@index([createdAt])
+}
